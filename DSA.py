@@ -4,9 +4,16 @@ from operator import itemgetter
 import pandas as pd
 import re
 import time
+from scipy.stats import pearsonr, f_oneway
 
 
 def get_dataset(file_name, use_default_path=True):
+    """
+    Gets the dataset located at file_name
+    If use_default_path then it adds a base_url before the file name
+    Converts all the data into string data
+    return: pandas dataframe
+    """
     base_url = '../datasets/'
     if use_default_path:
         file = pd.read_csv(base_url+file_name+'.csv', sep=',')
@@ -172,6 +179,7 @@ def enrich_data_all_candidates(dataset_name, data_path, query_column, target_col
     final_tables = []
     final_cols = []
     final_overlapping_cols = []
+    # In the next query tokenized is the value
     tables_fetch_query = 'SELECT tableid, colid, rowid, table_row_id, tokenized FROM cbi_inverted_index_2 WHERE tableid IN (\'{}\') order by tableid, colid, rowid;'.format(
         '\',\''.join(s))
     cur.execute(tables_fetch_query)
@@ -213,6 +221,8 @@ def enrich_data_all_candidates(dataset_name, data_path, query_column, target_col
 
         df_temp = pd.DataFrame.from_dict(
             temp_external_join_table, orient='index').drop_duplicates(column, keep='last')
+        # Convert columns to float where it is possible
+        df_temp = df_temp.apply(pd.to_numeric, errors="ignore")
 
         a = time.time()
         df_cd = pd.merge(data, df_temp, how='left',
@@ -230,13 +240,32 @@ def enrich_data_all_candidates(dataset_name, data_path, query_column, target_col
         total_save_time += t
 
         for c in range(max_col + 1):
+            # here it adds other columns of the database
             # if '{}_{}'.format(table, column) not in numerics_dict or c not in numerics_dict['{}_{}'.format(table, column)]:
             #     continue
             if c != column:
                 column_to_be_added = df_cd[str(c)]
-                column_added_count += 1
-                column_name += [str(table) + '_' + str(c)]
-                column_content += [column_to_be_added.copy()]
+                add = False
+                if column_to_be_added.dtype == float:
+                    column_to_be_added = column_to_be_added.fillna(column_to_be_added.mean() if not(pd.isna(column_to_be_added.mean())) else 0.)
+                    inf_mask = column_to_be_added == np.inf
+                    column_to_be_added[inf_mask] = column_to_be_added.mean() if column_to_be_added.mean() < np.inf else 0.
+                    correlation = pearsonr(column_to_be_added, data[target_column])[0]
+                    print('Correlation of column {} in table {} is : {}'.format(c, table, correlation))
+                    if abs(correlation) > 0.5:
+                        add = True
+                else:
+                    # column_to_be_added = column_to_be_added.fillna(None)
+                    data_grouped = df_cd.groupby(str(c))[target_column].agg(list).values
+                    f_test_stat = f_oneway(*list(data_grouped))[0]
+                    print('F test statistic of column {} in table {} is : {}'.format(c, table, f_test_stat))
+                    if f_test_stat > 5:
+                        add = True
+
+                if add:
+                    column_added_count += 1
+                    column_name += [str(table) + '_' + str(c)]
+                    column_content += [column_to_be_added.copy()]
                 # final_cols += [str(c)]
                 # final_overlapping_cols += [str(column)]
                 # final_tables += [str(table)]
@@ -431,58 +460,59 @@ def enrich_data(dataset_name, data_path, query_column, target_column, k, univers
 
     connection.close()
 
+if __name__ == "__main__":
 
-enrich_data_all_candidates(
-    'universities', '../datasets/universities', 'name', 'target', 100, 50)
-enrich_data_all_candidates(
-    'universities', '../datasets/universities', 'name', 'target', 100, 100)
-enrich_data_all_candidates(
-    'universities', '../datasets/universities', 'name', 'target', 100, 1000)
-enrich_data_all_candidates(
-    'universities', '../datasets/universities', 'name', 'target', 100, 5000)
-enrich_data_all_candidates(
-    'universities', '../datasets/universities', 'name', 'target', 100, 10000)
+    enrich_data_all_candidates(
+        'universities', '../datasets/universities', 'name', 'target', 100, 3)
+    # enrich_data_all_candidates(
+    #    'universities', '../datasets/universities', 'name', 'target', 100, 100)
+    # enrich_data_all_candidates(
+    #    'universities', '../datasets/universities', 'name', 'target', 100, 1000)
+    # enrich_data_all_candidates(
+    #    'universities', '../datasets/universities', 'name', 'target', 100, 5000)
+    # enrich_data_all_candidates(
+    #    'universities', '../datasets/universities', 'name', 'target', 100, 10000)
 
-enrich_data_all_candidates('presidential_final_3000',
-                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 50)
-enrich_data_all_candidates('presidential_final_3000',
-                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 100)
-enrich_data_all_candidates('presidential_final_3000',
-                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 1000)
-enrich_data_all_candidates('presidential_final_3000',
-                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 5000)
-enrich_data_all_candidates('presidential_final_3000',
-                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 10000)
+    #enrich_data_all_candidates('presidential_final_3000',
+    #                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 50)
+    #enrich_data_all_candidates('presidential_final_3000',
+    #                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 100)
+    #enrich_data_all_candidates('presidential_final_3000',
+    #                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 1000)
+    #enrich_data_all_candidates('presidential_final_3000',
+    #                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 5000)
+    #enrich_data_all_candidates('presidential_final_3000',
+    #                           '../datasets/presidential_final_3000', 'County', 'Votes', 100, 10000)
 
-enrich_data_all_candidates(
-    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 50)
-enrich_data_all_candidates(
-    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 100)
-enrich_data_all_candidates(
-    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 1000)
-enrich_data_all_candidates(
-    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 5000)
-enrich_data_all_candidates(
-    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 10000)
+    # enrich_data_all_candidates(
+        # 'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 50)
+    #enrich_data_all_candidates(
+    #    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 100)
+    #enrich_data_all_candidates(
+    #    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 1000)
+    #enrich_data_all_candidates(
+    #    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 5000)
+    #enrich_data_all_candidates(
+    #    'movie', '../datasets/movie', 'movie_title', 'imdb_score', 100, 10000)
 
-enrich_data_all_candidates(
-    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 50)
-enrich_data_all_candidates(
-    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 100)
-enrich_data_all_candidates(
-    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 1000)
-enrich_data_all_candidates(
-    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 5000)
-enrich_data_all_candidates(
-    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 10000)
-#
-enrich_data_all_candidates('worldcitiespop_top_40000',
-                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 50)
-enrich_data_all_candidates('worldcitiespop_top_40000',
-                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 100)
-enrich_data_all_candidates('worldcitiespop_top_40000',
-                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 1000)
-enrich_data_all_candidates('worldcitiespop_top_40000',
-                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 5000)
-enrich_data_all_candidates('worldcitiespop_top_40000',
-                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 10000)
+    #enrich_data_all_candidates(
+    #    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 50)
+    #enrich_data_all_candidates(
+    #    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 100)
+    #enrich_data_all_candidates(
+    #    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 1000)
+    #enrich_data_all_candidates(
+    #    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 5000)
+    #enrich_data_all_candidates(
+    #    'pageviews_final_11000', '../datasets/pageviews_final_11000', 'name', 'visit', 100, 10000)
+    #
+    #enrich_data_all_candidates('worldcitiespop_top_40000',
+    #                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 50)
+    #enrich_data_all_candidates('worldcitiespop_top_40000',
+    #                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 100)
+    #enrich_data_all_candidates('worldcitiespop_top_40000',
+    #                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 1000)
+    #enrich_data_all_candidates('worldcitiespop_top_40000',
+    #                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 5000)
+    #enrich_data_all_candidates('worldcitiespop_top_40000',
+    #                           '../datasets/worldcitiespop_top_40000', 'City', 'Population', 100, 10000)
