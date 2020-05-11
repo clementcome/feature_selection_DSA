@@ -106,7 +106,7 @@ def connect_to_database() -> DBConnection:
 
 
 @timer
-def get_overlappings(k: int, data_path: str, query_column: str, connection: DBConnection = None) -> List[str]:
+def get_overlappings(k: int, data: pd.DataFrame, query_column: str, connection: DBConnection = None) -> List[str]:
     """
     Choose k table to perform join with the base dataset.
     The order of the tables is determined by the number of appearances of every value
@@ -116,8 +116,8 @@ def get_overlappings(k: int, data_path: str, query_column: str, connection: DBCo
     ----------
     k : int
         Max number of table to join the base dataset to
-    data_path : str
-        Path to the dataset
+    data : pd.DataFrame
+        Base dataset
     query_column : str
         Column of the base dataset to use as join key
 
@@ -133,10 +133,9 @@ def get_overlappings(k: int, data_path: str, query_column: str, connection: DBCo
         connection = connect_to_database()
     cur = connection.cursor()
 
-    data = get_dataset(data_path)[[query_column]]
-    data[query_column] = data[query_column].apply(get_cleaned_text)
+    query_data = data[query_column].apply(get_cleaned_text)
 
-    distinct_clean_values = data[query_column].unique()
+    distinct_clean_values = query_data.unique()
     joint_distinct_values = '\',\''.join(
         distinct_clean_values).encode('utf-8')
 
@@ -171,6 +170,10 @@ def extract_table_and_col_id(overlappings: List[str]) -> Tuple[List[int], List[i
 
 @timer
 def table_max_column(table_id_list: List[int], connection: DBConnection = None) -> Dict[int, int]:
+    """
+    Return a dictionary where key is the id of a table in table_id_list
+    and value is the max column of this table 
+    """
 
     if connection == None:
         connection = connect_to_database()
@@ -188,6 +191,12 @@ def table_max_column(table_id_list: List[int], connection: DBConnection = None) 
 
 
 def get_clean_dataset(data_path: str, query_column: str, target_column: str) -> pd.DataFrame:
+    """
+    Returns the dataset contain in the file found at data_path
+    The dataset will only contain :\n
+    - the query_colum with values cleaned by get_cleaned_text function\n
+    - the target column with values as float
+    """
     data = get_dataset(data_path, use_default_path=False)[
         [query_column, target_column]]
     data[query_column] = data[query_column].apply(get_cleaned_text)
@@ -197,7 +206,26 @@ def get_clean_dataset(data_path: str, query_column: str, target_column: str) -> 
 
 
 @timer
-def get_external_tables(table_id_list: List[int], connection: DBConnection = None) -> pd.DataFrame:
+def get_external_tables(table_id_list: List[int], connection: DBConnection = None) -> Dict[int, Dict[int, List[str]]]:
+    """
+    Gathers in a dictionary all the tables listed by table_id_list.
+    To obtain the table designated by the table_id as a DataFrame, you can do :\n
+    table = pd.DataFrame.from_dict(result[table_id], orient="index")
+
+    Parameters
+    ----------
+    table_id_list : List[int]
+        List of the table ids to retrieve
+    connection : DBConnection, optional
+        Connection to the database. If not provided, the connection will be initialized, by default None
+
+    Returns
+    -------
+    Dict[int, Dict[int, List[str]]]
+        Dictionary with table_id as key.
+        result[table_id] is also a dictionary with the row_id as key.
+        result[table_id][row_id] is the list of the values contained in the row in the table designated by row_id and table_id
+    """
 
     if connection == None:
         connection = connect_to_database()
@@ -213,4 +241,9 @@ def get_external_tables(table_id_list: List[int], connection: DBConnection = Non
     temp = external_tables.sort_values(by=['tableid', 'rowid', 'colid']).groupby(
         ['tableid', 'rowid']).tokenized.apply(list).reset_index()
 
-    return temp
+    external_table_dict = {
+        table_id: table_df[["rowid", "tokenized"]].set_index("rowid").to_dict()[
+            "tokenized"]
+        for table_id, table_df in temp.groupby("tableid")}
+
+    return external_table_dict
