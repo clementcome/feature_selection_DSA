@@ -1,12 +1,14 @@
 import time
 import functools
 import logging
+import os
 from datetime import datetime
 
 
 def timer(func):
+    log_file = os.getenv("LOG_FILE", "time.log")
     logging.basicConfig(
-        filename="time.log", level=logging.INFO, format="[%(levelname)s] %(asctime)s %(message)s")
+        filename=log_file, level=logging.INFO, format="[%(levelname)s] %(asctime)s %(message)s")
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
