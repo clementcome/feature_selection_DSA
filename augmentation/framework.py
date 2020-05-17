@@ -36,12 +36,11 @@ class Framework:
         if use_default_path:
             file = pd.read_csv(base_url+file_name+'.csv', sep=separ)
         else:
-            file = pd.read_csv(file_name+'.csv', sep=separ)
+            file = pd.read_csv(file_name, sep=separ)
         # file = file.replace("'", "''")
         file = file.apply(lambda x: x.astype(str).str.lower())
         return file
 
-    @timer
     def get_cleaned_text(self, text: str) -> str:
         """Removes non-word characters and stopwords."""
         if text is None:
@@ -129,10 +128,10 @@ class Framework:
         """
 
         if connection == None:
-            connection = connect_to_database()
+            connection = self.connect_to_database()
         cur = connection.cursor()
 
-        query_data = data[query_column].apply(get_cleaned_text)
+        query_data = data[query_column].apply(self.get_cleaned_text)
 
         distinct_clean_values = query_data.unique()
         joint_distinct_values = '\',\''.join(
@@ -151,7 +150,6 @@ class Framework:
 
         result = [item for sublist in cur.fetchall()
                   for item in sublist]
-        connection.close()
         return result
 
     def extract_table_and_col_id(self, overlappings: List[str]) -> Tuple[List[int], Dict[int, int]]:
@@ -176,7 +174,7 @@ class Framework:
         """
 
         if connection == None:
-            connection = connect_to_database()
+            connection = self.connect_to_database()
         cur = connection.cursor()
 
         # Transforming table_ids from integers to strings
@@ -196,10 +194,10 @@ class Framework:
         - the query_colum with values cleaned by get_cleaned_text function\n
         - the target column with values as float
         """
-        data = get_dataset(data_path, use_default_path=False)[
+        data = self.get_dataset(data_path, use_default_path=False)[
             [query_column, target_column]]
         data[query_column] = data[query_column].apply(
-            get_cleaned_text)
+            self.get_cleaned_text)
         # Only supports regression until now
         data[target_column] = data[target_column].astype(float)
         return data
@@ -227,7 +225,7 @@ class Framework:
         """
 
         if connection == None:
-            connection = connect_to_database()
+            connection = self.connect_to_database()
         cur = connection.cursor()
 
         s = [str(table_id) for table_id in table_id_list]
@@ -254,6 +252,8 @@ class Framework:
         """
         Generate the table corresponding to table_id without duplicates and 
         ordered in the same way as data along the query_column and col_id_dict[table_id]
+        Query column is not anymore in columns but is an index.
+        To append the column to an other dataset, you should reset the index and drop it.
 
         Parameters
         ----------
@@ -292,9 +292,39 @@ class Framework:
                 query_column_external = col_id_dict[table_id]
                 df_table = self.get_external_table_cleaned(
                     table_id, external_dict, col_id_dict, data, query_column)
+                df_table = df_table.reset_index(drop=True)
                 for column_id in column_list:
-                    if column_id != query_column_external:
-                        data[f"{table_id}_{column_id}"] = df_table[column_id]
+                    data[f"{table_id}_{column_id}"] = df_table[column_id]
         dataset_name = os.path.basename(data_path).split(".")[0]
         data.to_csv(
             f"../enriched/{dataset_name}_enriched_{k}.csv", index=False)
+        return data
+
+    def run(self, data_path: str, query_column: str, target_column: str, k: int):
+        data = self.get_clean_dataset(
+            data_path, query_column, target_column)
+        connection = self.connect_to_database()
+
+        overlappings = self.get_overlappings(
+            k, data, query_column, connection)
+        table_id_list, col_id_dict = self.extract_table_and_col_id(
+            overlappings)
+        max_column_dict = self.table_max_column(
+            table_id_list, connection)
+
+        external_table_dict = self.get_external_table_dict(
+            table_id_list, connection)
+
+        # Iterating on the external_tables to get statistics
+        table_and_col_to_keep = {}
+        for table_id in table_id_list:
+            df_table = self.get_external_table_cleaned(
+                table_id, external_table_dict, col_id_dict, data, query_column)
+            # To do : integrate a feature selector component
+            table_and_col_to_keep[table_id] = list(df_table.columns)
+
+        data = self.perform_join(table_and_col_to_keep, col_id_dict,
+                                 external_table_dict, data, query_column, data_path, k)
+
+        connection.close()
+        return data

@@ -6,7 +6,7 @@ import os
 
 @pytest.fixture()
 def data_path():
-    return "../datasets/universities"
+    return "../datasets/universities.csv"
 
 
 @pytest.fixture()
@@ -117,8 +117,9 @@ def test_join_external_table(framework, external_table_dict, table_id1, col_id1,
     mock_col_id_dict = {table_id1: col_id1}
     df_to_join = framework.get_external_table_cleaned(
         table_id1, external_table_dict, mock_col_id_dict, data, query_column)
-    df_join = pd.merge(data, df_to_join, how="left",
-                       left_on=query_column, right_on=col_id1)
+    df_join = pd.merge(data, df_to_join.reset_index(), how="left",
+                       left_on=query_column, right_on=query_column)
+    df_to_join = df_to_join.reset_index(drop=True)
     df_append = data
     for c in df_to_join.columns:
         if c != col_id1:
