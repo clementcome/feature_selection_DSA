@@ -43,9 +43,21 @@ def test_connect_to_database(framework,):
     connection.close()
 
 
+@pytest.fixture()
+def remove_cache_file():
+    os.remove("../cache/overlappings_universities_3.json")
+
+
 # Test get_overlappings
-def test_overlappings(framework, data, query_column):
-    overlappings = framework.get_overlappings(3, data, query_column)
+def test_overlappings_create_file(
+    framework, data, query_column, data_path, remove_cache_file
+):
+    overlappings = framework.get_overlappings(3, data, query_column, data_path)
+    assert len(overlappings) < 4
+
+
+def test_overlappings_read_file(framework, data, query_column, data_path):
+    overlappings = framework.get_overlappings(3, data, query_column, data_path)
     assert len(overlappings) < 4
 
 
@@ -112,24 +124,24 @@ def test_dataframe_from_external_table(framework, table_id2, external_table_dict
     assert len(df.columns) > 1
 
 
-# Test get_external_table_cleaned
-def test_join_external_table(
-    framework, external_table_dict, table_id1, col_id1, data, query_column
-):
-    mock_col_id_dict = {table_id1: col_id1}
-    df_to_join = framework.get_external_table_cleaned(
-        table_id1, external_table_dict, mock_col_id_dict, data, query_column
-    )
-    df_join = pd.merge(
-        data,
-        df_to_join.reset_index(),
-        how="left",
-        left_on=query_column,
-        right_on=query_column,
-    )
-    df_to_join = df_to_join.reset_index(drop=True)
-    df_append = data
-    for c in df_to_join.columns:
-        if c != col_id1:
-            df_append[c] = df_to_join[c]
-    assert df_join.equals(df_append)
+# # Test get_external_table_cleaned
+# def test_join_external_table(
+#     framework, external_table_dict, table_id1, col_id1, data, query_column
+# ):
+#     mock_col_id_dict = {table_id1: col_id1}
+#     df_to_join = framework.get_external_table_cleaned(
+#         table_id1, external_table_dict, mock_col_id_dict, data, query_column
+#     )
+#     df_join = pd.merge(
+#         data,
+#         df_to_join.reset_index(),
+#         how="left",
+#         left_on=query_column,
+#         right_on=query_column,
+#     )
+#     df_to_join = df_to_join.reset_index(drop=True)
+#     df_append = data
+#     for c in df_to_join.columns:
+#         if c != col_id1:
+#             df_append[c] = df_to_join[c]
+#     assert df_join.equals(df_append)

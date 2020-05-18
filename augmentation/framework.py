@@ -1,16 +1,28 @@
 from typing import Tuple, List, Dict
 from timer.timer import timer
+from augmentation.feature_selector import FeatureSelector
 
 import numpy as np
 import pandas as pd
 import vertica_python
 import re
 import os
+import json
 
 DBConnection = vertica_python.vertica.connection.Connection
 
 
 class Framework:
+    """
+    Implementation of the general framework to perform data augmentation
+    """
+
+    def __init__(self, feature_selector: FeatureSelector = None):
+        if feature_selector == None:
+            self.feature_selector = FeatureSelector()
+        else:
+            self.feature_selector = feature_selector
+
     @timer
     def get_dataset(
         self, file_name: str, use_default_path: bool = True, separ: str = ","
@@ -142,6 +154,7 @@ class Framework:
         k: int,
         data: pd.DataFrame,
         query_column: str,
+        data_path: str,
         connection: DBConnection = None,
     ) -> List[str]:
         """
@@ -170,6 +183,14 @@ class Framework:
             connection = self.connect_to_database()
         cur = connection.cursor()
 
+        if data_path:
+            dataset_name = os.path.basename(data_path).split(".")[0]
+            if os.path.exists(f"../cache/overlappings_{dataset_name}_{k}.json"):
+                with open(
+                    f"../cache/overlappings_{dataset_name}_{k}.json"
+                ) as cache_file:
+                    return json.load(cache_file)
+
         query_data = data[query_column].apply(self.get_cleaned_text)
 
         distinct_clean_values = query_data.unique()
@@ -190,6 +211,9 @@ class Framework:
         cur.execute(query)
 
         result = [item for sublist in cur.fetchall() for item in sublist]
+        with open(f"../cache/overlappings_{dataset_name}_{k}.json", "w+") as cache_file:
+            json.dump(result, cache_file)
+
         return result
 
     def extract_table_and_col_id(
@@ -386,7 +410,7 @@ class Framework:
         for table_id, column_list in table_and_col_to_keep.items():
             if len(column_list) > 0:
                 query_column_external = col_id_dict[table_id]
-                df_table = self.get_external_table_cleaned(
+                df_table = self.feature_selector.prepare_join(
                     table_id, external_dict, col_id_dict, data, query_column
                 )
                 df_table = df_table.reset_index(drop=True)
@@ -421,20 +445,29 @@ class Framework:
         data = self.get_clean_dataset(data_path, query_column, target_column)
         connection = self.connect_to_database()
 
-        overlappings = self.get_overlappings(k, data, query_column, connection)
+        overlappings = self.get_overlappings(
+            k, data, query_column, data_path, connection
+        )
         table_id_list, col_id_dict = self.extract_table_and_col_id(overlappings)
         max_column_dict = self.table_max_column(table_id_list, connection)
 
         external_table_dict = self.get_external_table_dict(table_id_list, connection)
+        type_dict = self.feature_selector.get_type_dict(
+            external_table_dict, col_id_dict, data, query_column
+        )
 
         # Iterating on the external_tables to get statistics
-        table_and_col_to_keep = {}
-        for table_id in table_id_list:
-            df_table = self.get_external_table_cleaned(
-                table_id, external_table_dict, col_id_dict, data, query_column
-            )
-            # To do : integrate a feature selector component
-            table_and_col_to_keep[table_id] = list(df_table.columns)
+        stat_dict = self.feature_selector.evaluate(
+            external_table_dict,
+            col_id_dict,
+            type_dict,
+            data,
+            query_column,
+            target_column,
+        )
+        table_and_col_to_keep = self.feature_selector.select_column(
+            stat_dict, type_dict
+        )
 
         data = self.perform_join(
             table_and_col_to_keep,
