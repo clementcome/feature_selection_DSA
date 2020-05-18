@@ -26,11 +26,13 @@ class FeatureSelector:
         self, column: pd.Series, target_column: pd.Series
     ) -> float:
         if self.numeric_stat == "pearson":
-            column = column.fillna(
-                column.mean() if not (pd.isna(column.mean())) else 0.0
-            )
+            replace_value = 0
+            if pd.isna(column.mean()) == False:
+                if column.mean() < np.inf:
+                    replace_value = column.mean()
+            column = column.fillna(replace_value)
             inf_mask = column == np.inf
-            column[inf_mask] = column.mean() if column.mean() < np.inf else 0.0
+            column[inf_mask] = replace_value
             correlation = pearsonr(column, target_column)[0]
             print("Correlation coefficient is : ", correlation)
             return abs(correlation)
@@ -88,6 +90,7 @@ class FeatureSelector:
             external_table = self.prepare_join(
                 table_id, external_table_dict, col_id_dict, data, query_column
             )
+            external_table = external_table.apply(pd.to_numeric, errors="ignore")
             type_table_dict = {}
             for column_id in external_table.columns:
                 column = external_table[column_id]
@@ -140,6 +143,7 @@ class FeatureSelector:
             for column_id in external_table.columns:
                 column = external_table[column_id]
                 if type_dict[table_id][column_id] == "numeric":
+                    column = pd.to_numeric(column)
                     stat = self.stat_numeric_numeric(column, data[target_column])
                 else:
                     stat = self.stat_numeric_categoric(column, data[target_column])
