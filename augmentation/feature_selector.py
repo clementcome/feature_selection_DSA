@@ -34,7 +34,6 @@ class FeatureSelector:
             inf_mask = column == np.inf
             column[inf_mask] = replace_value
             correlation = pearsonr(column, target_column)[0]
-            print("Correlation coefficient is : ", correlation)
             return abs(correlation)
         return 1.0
 
@@ -151,7 +150,6 @@ class FeatureSelector:
             stat_dict[table_id] = stat_table_dict
         return stat_dict
 
-    @timer
     def prepare_join(
         self,
         table_id: int,

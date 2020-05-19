@@ -417,7 +417,10 @@ class Framework:
                 for column_id in column_list:
                     data[f"{table_id}_{column_id}"] = df_table[column_id]
         dataset_name = os.path.basename(data_path).split(".")[0]
-        data.to_csv(f"../enriched/{dataset_name}_enriched_{k}.csv", index=False)
+        data.to_csv(
+            f"../enriched/{dataset_name}_enriched_{k}_{self.feature_selector.numeric_stat}_{self.feature_selector.categoric_stat}.csv",
+            index=False,
+        )
         return data
 
     def run(
@@ -449,7 +452,7 @@ class Framework:
             k, data, query_column, data_path, connection
         )
         table_id_list, col_id_dict = self.extract_table_and_col_id(overlappings)
-        max_column_dict = self.table_max_column(table_id_list, connection)
+        # max_column_dict = self.table_max_column(table_id_list, connection)
 
         external_table_dict = self.get_external_table_dict(table_id_list, connection)
         type_dict = self.feature_selector.get_type_dict(
