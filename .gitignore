@@ -1,5 +1,8 @@
 .vscode
 
+*.log
+*.csv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 
@@ -18,6 +21,7 @@ coverage.xml
 
 # Jupyter Notebook
 .ipynb_checkpoints
+test.ipynb
 
 # IPython
 profile_default/
