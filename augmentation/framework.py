@@ -418,7 +418,7 @@ class Framework:
                     data[f"{table_id}_{column_id}"] = df_table[column_id]
         dataset_name = os.path.basename(data_path).split(".")[0]
         data.to_csv(
-            f"../enriched/{dataset_name}_enriched_{k}_{self.feature_selector.numeric_stat}_{self.feature_selector.categoric_stat}.csv",
+            f"../enriched/{dataset_name}_enriched_{k}_{self.feature_selector.numeric_stat}_{self.feature_selector.categoric_stat}_{self.feature_selector.select_strategy}.csv",
             index=False,
         )
         return data

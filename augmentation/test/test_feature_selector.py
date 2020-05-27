@@ -19,10 +19,10 @@ def external_table_dict():
     for table in range(6):
         query_column = np.hstack([np.arange(15), np.arange(10)])
         shuffle(query_column)
-        categorical_column = np.hstack([choices(categoric_values, k=10), [None] * 15])
-        float_column_1 = np.hstack([np.random.rand(10), [None] * 15])
+        categorical_column = np.hstack([[None] * 15, choices(categoric_values, k=10)])
+        float_column_1 = np.hstack([[None] * 15, np.random.rand(10)])
         float_column_2 = np.hstack([np.random.randn(10), [None] * 15])
-        int_column = np.hstack([np.random.randint(10, size=(10,)), [None] * 15])
+        int_column = np.hstack([[None] * 15, np.random.randint(10, size=(10,))])
         df_dict = {
             1: query_column,
             2: categorical_column,
@@ -105,3 +105,18 @@ def test_pearson(
     numeric_column = df[2]
     stat = feature_selector.stat_numeric_numeric(numeric_column, data[target_column])
     assert stat <= 1.0
+
+
+# Test stat_numeric_categoric
+def test_anova(
+    table_id, external_table_dict, col_id_dict, data, query_column, target_column,
+):
+    feature_selector = FeatureSelector(categoric_stat="anova")
+    df = feature_selector.prepare_join(
+        table_id, external_table_dict, col_id_dict, data, query_column
+    )
+    categoric_column = df[1]
+    stat = feature_selector.stat_numeric_categoric(
+        categoric_column, data[target_column]
+    )
+    assert stat >= 0.0

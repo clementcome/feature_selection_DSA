@@ -1,8 +1,11 @@
 from typing import Dict, List
 from timer.timer import timer
+from operator import itemgetter
 import pandas as pd
 import numpy as np
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, f_oneway
+import logging
+import os
 
 
 class FeatureSelector:
@@ -10,17 +13,28 @@ class FeatureSelector:
     Class to define the strategy of feature selection
     """
 
+    log_file = os.getenv("LOG_FILE", "time.log")
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format="[%(levelname)s] %(asctime)s %(message)s",
+    )
+
     def __init__(
         self,
         numeric_threshold: float = 0.5,
         categoric_threshold: float = 0.5,
         numeric_stat: str = "constant",
         categoric_stat: str = "constant",
+        select_strategy: str = "threshold",
+        k_best: str = 10,
     ):
         self.numeric_threshold = numeric_threshold
         self.categoric_threshold = categoric_threshold
         self.numeric_stat = numeric_stat
         self.categoric_stat = categoric_stat
+        self.select_strategy = select_strategy
+        self.k_best = k_best
 
     def stat_numeric_numeric(
         self, column: pd.Series, target_column: pd.Series
@@ -40,6 +54,15 @@ class FeatureSelector:
     def stat_numeric_categoric(
         self, column: pd.Series, target_column: pd.Series
     ) -> float:
+        if self.categoric_stat == "anova":
+            column = column.reset_index(drop=True).fillna("None value")
+            target_column = target_column.reset_index(drop=True)
+            df = pd.concat(
+                [column, target_column], axis=1, keys=["column_to_evaluate", "target"]
+            )
+            data_grouped = df.groupby("column_to_evaluate")["target"].agg(list).values
+            f_test_stat = f_oneway(*list(data_grouped))[0]
+            return f_test_stat
         return 1.0
 
     def select_column(
@@ -62,18 +85,50 @@ class FeatureSelector:
         Dict[int, List[int]]
             result[table_id] is the list of the columns to keep for a given table
         """
+        logging.info(f"Execution of select_column with {self.select_strategy} strategy")
+
         table_column_to_keep = {}
-        for table_id in stat_dict.keys():
-            column_to_keep = []
-            stat_table_dict = stat_dict[table_id]
-            for column_id in stat_table_dict.keys():
-                if type_dict[table_id][column_id] == "numeric":
-                    if stat_table_dict[column_id] > self.numeric_threshold:
-                        column_to_keep.append(column_id)
+        if self.select_strategy == "k_best":
+            table_col_stat_numeric = [
+                (table_id, col_id, score)
+                for table_id, dic_table in stat_dict.items()
+                for col_id, score in dic_table.items()
+                if type_dict[table_id][col_id] == "numeric"
+            ]
+            table_col_stat_categoric = [
+                (table_id, col_id, score)
+                for table_id, dic_table in stat_dict.items()
+                for col_id, score in dic_table.items()
+                if type_dict[table_id][col_id] == "categoric"
+            ]
+            table_col_stat_numeric_to_keep = sorted(
+                table_col_stat_numeric, key=itemgetter(2), reverse=True
+            )[: self.k_best]
+            table_col_stat_categoric_to_keep = sorted(
+                table_col_stat_categoric, key=itemgetter(2), reverse=True
+            )[: self.k_best]
+            for table_id, col_id, _ in table_col_stat_numeric_to_keep:
+                if table_id in table_column_to_keep.keys():
+                    table_column_to_keep[table_id].append(col_id)
                 else:
-                    if stat_table_dict[column_id] > self.categoric_threshold:
-                        column_to_keep.append(column_id)
-            table_column_to_keep[table_id] = column_to_keep
+                    table_column_to_keep[table_id] = [col_id]
+            for table_id, col_id, _ in table_col_stat_categoric_to_keep:
+                if table_id in table_column_to_keep.keys():
+                    table_column_to_keep[table_id].append(col_id)
+                else:
+                    table_column_to_keep[table_id] = [col_id]
+        if self.select_strategy == "threshold":
+            for table_id in stat_dict.keys():
+                column_to_keep = []
+                stat_table_dict = stat_dict[table_id]
+                for column_id in stat_table_dict.keys():
+                    if type_dict[table_id][column_id] == "numeric":
+                        if stat_table_dict[column_id] > self.numeric_threshold:
+                            column_to_keep.append(column_id)
+                    else:
+                        if stat_table_dict[column_id] > self.categoric_threshold:
+                            column_to_keep.append(column_id)
+                table_column_to_keep[table_id] = column_to_keep
         return table_column_to_keep
 
     def get_type_dict(
@@ -133,6 +188,9 @@ class FeatureSelector:
         Dict[int, Dict[int, float]]
             result[table_id][column_id] is the value of the statistic comparing the column and the target_column
         """
+        logging.info(
+            f"Execution of evaluate with {self.numeric_stat} {self.categoric_stat} as numeric and categorical stats."
+        )
         stat_dict = {}
         for table_id in external_table_dict.keys():
             external_table = self.prepare_join(
