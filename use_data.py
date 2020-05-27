@@ -18,8 +18,15 @@ print("File available here : ", os.listdir())
 for file in os.listdir():
     if "universities" in file:
         df = pd.read_csv(file)
-        df = df.drop(columns=df.columns[df.dtypes == "object"])
-        df = df.fillna(0.0)
+        df_categoric = df[df.columns[df.dtypes == "object"]]
+        df_numeric = df.drop(columns=df_categoric.columns)
+        for col in df_numeric.columns:
+            if not (pd.isna(df_numeric[col].mean())):
+                df_numeric[col] = df_numeric[col].fillna(df_numeric[col].mean())
+            else:
+                df_numeric = df_numeric.drop(columns=[col])
+        df_categoric_one_hot = pd.get_dummies(df_categoric)
+        df = pd.concat([df_numeric, df_categoric_one_hot], axis=1)
         df_train, df_test = train_test_split(df)
         predicting_columns = list(df.columns)
         predicting_columns.remove("target")
