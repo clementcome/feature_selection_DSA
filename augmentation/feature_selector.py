@@ -65,6 +65,7 @@ class FeatureSelector:
             return f_test_stat
         return 1.0
 
+    @timer
     def select_column(
         self,
         stat_dict: Dict[int, Dict[int, float]],
