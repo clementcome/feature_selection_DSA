@@ -32,7 +32,9 @@ def table_col_stat(
         for table_id, dic_table in stat_dict.items()
         for col_id, score in dic_table.items()
         if type_dict[table_id][col_id] == type_
+        if not (np.isnan(score))
     ]
+    return table_col_stat
 
 
 def k_best_independent(
@@ -70,6 +72,59 @@ def k_best_independent(
         else:
             table_column_to_keep[table_id] = [col_id]
     for table_id, col_id, _ in table_col_stat_categoric_to_keep:
+        if table_id in table_column_to_keep.keys():
+            table_column_to_keep[table_id].append(col_id)
+        else:
+            table_column_to_keep[table_id] = [col_id]
+    return table_column_to_keep
+
+
+def k_best_normalized(
+    stat_dict: Dict[int, Dict[int, float]],
+    type_dict: Dict[int, Dict[int, float]],
+    k_best: int,
+) -> Dict[int, List[int]]:
+    """
+    Peforms the k-best strategy on numeric data and categorical data independently
+
+    Parameters
+    ----------
+    stat_dict : Dict[int, Dict[int, float]]
+        Statistics of each column
+    type_dict : Dict[int, Dict[int, str]]
+        Type of each column
+
+    Returns
+    -------
+    Dict[int, List[int]]
+        result[table_id] is the list of the columns to keep for a given table
+    """
+    table_column_to_keep = {}
+    table_col_stat_numeric = table_col_stat(stat_dict, type_dict, "numeric")
+    table_col_stat_categoric = table_col_stat(stat_dict, type_dict, "categoric")
+    stat_numeric = np.array([line[2] for line in table_col_stat_numeric])
+    stat_numeric_norm = (stat_numeric - np.min(stat_numeric)) / (
+        np.max(stat_numeric) - np.min(stat_numeric)
+    )
+    table_col_stat_numeric_norm = [
+        (table, col, stat_norm)
+        for (table, col, _), stat_norm in zip(table_col_stat_numeric, stat_numeric_norm)
+    ]
+    stat_categoric = np.array([line[2] for line in table_col_stat_categoric])
+    stat_categoric_norm = (stat_categoric - np.min(stat_categoric)) / (
+        np.max(stat_categoric) - np.min(stat_categoric)
+    )
+    table_col_stat_categoric_norm = [
+        (table, col, stat_norm)
+        for (table, col, _), stat_norm in zip(
+            table_col_stat_categoric, stat_categoric_norm
+        )
+    ]
+    table_col_stat_norm = table_col_stat_numeric_norm + table_col_stat_categoric_norm
+    table_col_stat_to_keep = sorted(
+        table_col_stat_norm, key=itemgetter(2), reverse=True
+    )[:k_best]
+    for table_id, col_id, _ in table_col_stat_to_keep:
         if table_id in table_column_to_keep.keys():
             table_column_to_keep[table_id].append(col_id)
         else:
