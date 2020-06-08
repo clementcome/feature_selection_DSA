@@ -3,7 +3,8 @@ from timer.timer import timer
 from operator import itemgetter
 import pandas as pd
 import numpy as np
-from scipy.stats import pearsonr, f_oneway
+from .statistics import pearson, anova
+from .strategy import k_best_independent
 import logging
 import os
 
@@ -40,29 +41,14 @@ class FeatureSelector:
         self, column: pd.Series, target_column: pd.Series
     ) -> float:
         if self.numeric_stat == "pearson":
-            replace_value = 0
-            if pd.isna(column.mean()) == False:
-                if column.mean() < np.inf:
-                    replace_value = column.mean()
-            column = column.fillna(replace_value)
-            inf_mask = column == np.inf
-            column[inf_mask] = replace_value
-            correlation = pearsonr(column, target_column)[0]
-            return abs(correlation)
+            return pearson(column, target_column)
         return 1.0
 
     def stat_numeric_categoric(
         self, column: pd.Series, target_column: pd.Series
     ) -> float:
         if self.categoric_stat == "anova":
-            column = column.reset_index(drop=True).fillna("None value")
-            target_column = target_column.reset_index(drop=True)
-            df = pd.concat(
-                [column, target_column], axis=1, keys=["column_to_evaluate", "target"]
-            )
-            data_grouped = df.groupby("column_to_evaluate")["target"].agg(list).values
-            f_test_stat = f_oneway(*list(data_grouped))[0]
-            return f_test_stat
+            return anova(column, target_column)
         return 1.0
 
     @timer
@@ -90,34 +76,7 @@ class FeatureSelector:
 
         table_column_to_keep = {}
         if self.select_strategy == "k_best":
-            table_col_stat_numeric = [
-                (table_id, col_id, score)
-                for table_id, dic_table in stat_dict.items()
-                for col_id, score in dic_table.items()
-                if type_dict[table_id][col_id] == "numeric"
-            ]
-            table_col_stat_categoric = [
-                (table_id, col_id, score)
-                for table_id, dic_table in stat_dict.items()
-                for col_id, score in dic_table.items()
-                if type_dict[table_id][col_id] == "categoric"
-            ]
-            table_col_stat_numeric_to_keep = sorted(
-                table_col_stat_numeric, key=itemgetter(2), reverse=True
-            )[: self.k_best]
-            table_col_stat_categoric_to_keep = sorted(
-                table_col_stat_categoric, key=itemgetter(2), reverse=True
-            )[: self.k_best]
-            for table_id, col_id, _ in table_col_stat_numeric_to_keep:
-                if table_id in table_column_to_keep.keys():
-                    table_column_to_keep[table_id].append(col_id)
-                else:
-                    table_column_to_keep[table_id] = [col_id]
-            for table_id, col_id, _ in table_col_stat_categoric_to_keep:
-                if table_id in table_column_to_keep.keys():
-                    table_column_to_keep[table_id].append(col_id)
-                else:
-                    table_column_to_keep[table_id] = [col_id]
+            table_column_to_keep = k_best_independent(stat_dict, type_dict, self.k_best)
         if self.select_strategy == "threshold":
             for table_id in stat_dict.keys():
                 column_to_keep = []
