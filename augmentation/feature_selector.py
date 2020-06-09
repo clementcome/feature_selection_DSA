@@ -29,6 +29,7 @@ class FeatureSelector:
         categoric_stat: str = "constant",
         select_strategy: str = "threshold",
         k_best: str = 10,
+        one_hot_encoding: bool= True,
     ):
         self.numeric_threshold = numeric_threshold
         self.categoric_threshold = categoric_threshold
@@ -36,6 +37,7 @@ class FeatureSelector:
         self.categoric_stat = categoric_stat
         self.select_strategy = select_strategy
         self.k_best = k_best
+        self.one_hot_encoding=one_hot_encoding
 
     def stat_numeric_numeric(
         self, column: pd.Series, target_column: pd.Series
@@ -167,6 +169,36 @@ class FeatureSelector:
                 stat_table_dict[column_id] = stat
             stat_dict[table_id] = stat_table_dict
         return stat_dict
+    
+    def features_to_encode(
+        self,
+        df : pd.DataFrame,
+    ):
+        features_encode=[]
+        for column in df:
+            if column.dtype != float:
+                features_encode.append(column)
+        return(list(features_encode))
+
+    def encode_and_bind(
+        self,
+        df : pd.DataFrame, 
+        features_encode : list
+    ):    
+        if self.one_hot_encoding == True:
+            features_encode = features_to_encode(df)
+            for feature in features_encode:
+                
+                dummies = pd.get_dummies(df[[feature]])
+                df = pd.concat([df, dummies], axis=1)
+                df = df.drop([feature], axis=1)
+        return(df)
+
+
+
+    
+
+
 
     def prepare_join(
         self,
