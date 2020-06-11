@@ -12,7 +12,7 @@ name_query_target_list = [
 for name, query, target in name_query_target_list:
 
     print("---")
-    print(f"Augmenting the {name} dataset")
+    #print(f"Augmenting the {name} dataset")
 
     feature_selector_1 = FeatureSelector()
     framework = Framework(feature_selector_1)

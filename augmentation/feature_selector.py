@@ -163,41 +163,19 @@ class FeatureSelector:
                 column = external_table[column_id]
                 if type_dict[table_id][column_id] == "numeric":
                     column = pd.to_numeric(column)
-                    stat = self.stat_numeric_numeric(column, data[target_column])
-                else:
+                    stat = self.stat_numeric_numeric(column, data[target_column])   
+                elif self.one_hot_encoding == True:
+                    stat = 0
+                    dummies = pd.get_dummies(external_table[[column]])
+                    for column in dummies.columns:
+                        stat = stat + self.stat_numeric_numeric(column, data[target_column])
+                    stat = stat/len(dummies.columns)
+                else :
                     stat = self.stat_numeric_categoric(column, data[target_column])
                 stat_table_dict[column_id] = stat
             stat_dict[table_id] = stat_table_dict
         return stat_dict
     
-    def features_to_encode(
-        self,
-        df : pd.DataFrame,
-    ):
-        features_encode=[]
-        for column in df:
-            if column.dtype != float:
-                features_encode.append(column)
-        return(list(features_encode))
-
-    def encode_and_bind(
-        self,
-        df : pd.DataFrame, 
-        features_encode : list
-    ):    
-        if self.one_hot_encoding == True:
-            features_encode = features_to_encode(df)
-            for feature in features_encode:
-                
-                dummies = pd.get_dummies(df[[feature]])
-                df = pd.concat([df, dummies], axis=1)
-                df = df.drop([feature], axis=1)
-        return(df)
-
-
-
-    
-
 
 
     def prepare_join(
