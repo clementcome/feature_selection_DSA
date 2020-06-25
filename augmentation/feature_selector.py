@@ -4,7 +4,12 @@ from operator import itemgetter
 import pandas as pd
 import numpy as np
 from .statistics import pearson, anova
-from .strategy import k_best_independent, k_best_normalized
+from .strategy import (
+    k_best_independent,
+    k_best_min_max,
+    k_best_2nd_order,
+    k_best_quantile,
+)
 import logging
 import os
 
@@ -77,8 +82,12 @@ class FeatureSelector:
         table_column_to_keep = {}
         if self.select_strategy == "k_best":
             table_column_to_keep = k_best_independent(stat_dict, type_dict, self.k_best)
-        if self.select_strategy == "k_best_normalized":
-            table_column_to_keep = k_best_normalized(stat_dict, type_dict, self.k_best)
+        if self.select_strategy == "k_best_min_max":
+            table_column_to_keep = k_best_min_max(stat_dict, type_dict, self.k_best)
+        if self.select_strategy == "k_best_2nd_order":
+            table_column_to_keep = k_best_2nd_order(stat_dict, type_dict, self.k_best)
+        if self.select_strategy == "k_best_quantile":
+            table_column_to_keep = k_best_quantile(stat_dict, type_dict, self.k_best)
         if self.select_strategy == "threshold":
             for table_id in stat_dict.keys():
                 column_to_keep = []
