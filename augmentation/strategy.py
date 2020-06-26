@@ -33,6 +33,7 @@ def table_col_stat(
         for col_id, score in dic_table.items()
         if type_dict[table_id][col_id] == type_
     ]
+    return table_col_stat
 
 
 def k_best_independent(
