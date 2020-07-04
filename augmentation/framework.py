@@ -1,6 +1,7 @@
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Callable
 from timer.timer import timer
 from augmentation.feature_selector import FeatureSelector
+from augmentation.decision import decide
 
 import numpy as np
 import pandas as pd
@@ -468,6 +469,10 @@ class Framework:
             query_column,
             target_column,
         )
+
+        best_strategy = decide(stat_dict, type_dict)
+        print(f"The best strategy for your dataset is {best_strategy}")
+
         table_and_col_to_keep = self.feature_selector.select_column(
             stat_dict, type_dict
         )

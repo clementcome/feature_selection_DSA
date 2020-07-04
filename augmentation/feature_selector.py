@@ -82,13 +82,13 @@ class FeatureSelector:
         table_column_to_keep = {}
         if self.select_strategy == "k_best":
             table_column_to_keep = k_best_independent(stat_dict, type_dict, self.k_best)
-        if self.select_strategy == "k_best_min_max":
+        elif self.select_strategy == "k_best_min_max":
             table_column_to_keep = k_best_min_max(stat_dict, type_dict, self.k_best)
-        if self.select_strategy == "k_best_2nd_order":
+        elif self.select_strategy == "k_best_2nd_order":
             table_column_to_keep = k_best_2nd_order(stat_dict, type_dict, self.k_best)
-        if self.select_strategy == "k_best_quantile":
+        elif self.select_strategy == "k_best_quantile":
             table_column_to_keep = k_best_quantile(stat_dict, type_dict, self.k_best)
-        if self.select_strategy == "threshold":
+        elif self.select_strategy == "threshold":
             for table_id in stat_dict.keys():
                 column_to_keep = []
                 stat_table_dict = stat_dict[table_id]
@@ -100,6 +100,8 @@ class FeatureSelector:
                         if stat_table_dict[column_id] > self.categoric_threshold:
                             column_to_keep.append(column_id)
                 table_column_to_keep[table_id] = column_to_keep
+        else:
+            raise RuntimeError(f"Unexpected selection strategy: {self.select_strategy}")
         return table_column_to_keep
 
     def get_type_dict(
