@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from scipy.stats import beta, gamma
 from tqdm import tqdm
 from itertools import product
 from joblib import dump, load
@@ -15,7 +16,16 @@ from augmentation.strategy import (
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
-from sklearn.neural_network import MLPClassifier
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.preprocessing import normalize, MinMaxScaler
+
+import warnings
+
+warnings.filterwarnings("ignore")
+
+
+nb_num = 300
+nb_cat = 1000
 
 
 ## Data generation
@@ -268,7 +278,7 @@ def select_quantile_norm(N, C, Y, stat_dict, type_dict, k_best=20, show=False):
     return df_normalized
 
 
-## Model training
+# Model training
 
 
 def train_linear(df):
@@ -282,6 +292,78 @@ def train_linear(df):
 
 
 # Decision model
+
+
+def find_index_split(array, slices):
+    """Returns the indices of the ordered value of slices in the sorted array"""
+    indices = np.zeros_like(slices)
+    i_array = 0
+    for i_slice, value in enumerate(slices):
+        while (i_array < len(array)) and (array[i_array] < value):
+            i_array += 1
+        indices[i_slice] = i_array
+    return indices
+
+
+def stat_distance(stat, law):
+    stat_norm = (stat - np.min(stat)) / (np.max(stat) - np.min(stat))
+    ordered_stat_norm = np.sort(stat_norm)
+    nb_split = 10
+    slices = np.linspace(0, 1, nb_split + 1)
+    indice_slices = find_index_split(ordered_stat_norm, slices)
+    indice_slices = indice_slices.astype(int)
+    nb_slices = np.array(
+        [
+            indice_slices[i] - indice_slices[i - 1]
+            for i in range(1, indice_slices.shape[0])
+        ]
+    )
+    prob_slices = nb_slices / np.sum(nb_slices)
+    mid_slices = (stat[indice_slices[:-1]] + stat[indice_slices[1:]]) / 2
+    prob = law(mid_slices)
+    distance = np.sum(
+        np.where(np.logical_not(np.isinf(prob)), abs(prob_slices - law(mid_slices)), 0)
+    )
+    return distance
+
+
+def stat_quality(stat, law):
+    ordered_stat = np.sort(stat)
+    nb_split = 10
+    split_array = np.array_split(ordered_stat, nb_split)
+    split_means = np.array([np.mean(split) for split in split_array])
+    prob = law(split_means)
+    quality = np.sum(np.where(np.logical_not(np.isinf(prob)), prob, 0))
+    if np.isinf(quality):
+        print(split_means)
+        print(prob)
+        print(np.where(not (np.isinf(prob)), prob, 0))
+    return quality
+
+
+def beta_law(a, b):
+    return lambda x: beta.pdf(x, a, b)
+
+
+def beta_coeff_likelihood(stat):
+    stat_norm = (stat - np.min(stat)) / (np.max(stat) - np.min(stat))
+    a, b, _, _ = beta.fit(stat_norm)
+    law = beta_law(a, b)
+    distance = stat_distance(stat_norm, law)
+    quality = stat_quality(stat_norm, law)
+    return a, b, distance, quality
+
+
+def gamma_law(k):
+    return lambda x: gamma.pdf(x, k)
+
+
+def gamma_coeff_likelihood(stat):
+    k, _, _ = gamma.fit(stat)
+    law = gamma_law(k)
+    distance = stat_distance(stat, law)
+    quality = stat_quality(stat, law)
+    return k, distance, quality
 
 
 def get_input_from_stat_and_type(stat_dict, type_dict):
@@ -308,9 +390,33 @@ def get_input_from_stat_and_type(stat_dict, type_dict):
         "median": np.median,
         "stdev": np.std,
         "count": lambda x: x.shape[0],
+        "beta_coeff": beta_coeff_likelihood,
+        "gamma_coeff": gamma_coeff_likelihood,
     }
     input_data = {}
     for func_name, func in characteristic_func.items():
+        if func_name == "beta_coeff":
+            a_num, b_num, distance_num, quality_num = func(stat_numeric)
+            input_data[f"numeric_beta_a"] = a_num
+            input_data[f"numeric_beta_b"] = b_num
+            input_data[f"numeric_beta_distance"] = distance_num
+            input_data[f"numeric_beta_quality"] = quality_num
+            a_cat, b_cat, distance_cat, quality_cat = func(stat_categoric)
+            input_data[f"categoric_beta_a"] = a_cat
+            input_data[f"categoric_beta_b"] = b_cat
+            input_data[f"categoric_beta_distance"] = distance_cat
+            input_data[f"categoric_beta_quality"] = quality_cat
+            continue
+        elif func_name == "gamma_coeff":
+            k_num, distance_num, quality_num = func(stat_numeric)
+            input_data[f"numeric_gamma_k"] = k_num
+            input_data[f"numeric_gamma_distance"] = distance_num
+            input_data[f"numeric_gamma_quality"] = quality_num
+            k_cat, distance_cat, quality_cat = func(stat_categoric)
+            input_data[f"categoric_gamma_k"] = k_cat
+            input_data[f"categoric_gamma_distance"] = distance_cat
+            input_data[f"categoric_gamma_quality"] = quality_cat
+            continue
         input_data[f"numeric_{func_name}"] = func(stat_numeric)
         input_data[f"categoric_{func_name}"] = func(stat_categoric)
     return input_data
@@ -333,7 +439,7 @@ def decision_training(
     strategy_dict,
 ):
     input_list = []
-    best_strategy_list = []
+    strategy_score_list = []
     nb_num, nb_cat = corr.shape[0], anova.shape[0]
     t = tqdm(
         product(
@@ -390,100 +496,194 @@ def decision_training(
             get_input_from_stat_and_type(sample_stat_dict, sample_type_dict)
         )
 
-        best_mse = 100
-
+        strategy_score_dict = {}
         for strategy_name, strategy_func in strategy_dict.items():
             df_normalized = strategy_func(
                 sample_N, sample_C, Y, sample_stat_dict, sample_type_dict
             )
             mse = train_linear(df_normalized)
-            if mse < best_mse:
-                best_mse = mse
-                best_strategy = strategy_name
-        best_strategy_list.append(best_strategy)
-    return input_list, best_strategy_list
+            strategy_score_dict[strategy_name] = mse
+        strategy_score_list.append(strategy_score_dict)
+    return input_list, strategy_score_list
+
+
+def prediction_probability_from_mse(row):
+    min_score = np.min(row)
+    max_score = np.max(row)
+    return (max_score - row) / (max_score - min_score)
+
+
+def threshold_prob(prob):
+    if prob < 0.5:
+        return 0.0
+    return 1.0
+
+
+def accuracy_proba(y_true, y_pred):
+    result_choice = y_pred == pd.concat(
+        [
+            pd.DataFrame(y_pred.max(axis=1), columns=[column])
+            for column in y_pred.columns
+        ],
+        axis=1,
+    )
+    good_prediction = (result_choice & (y_true.reset_index(drop=True) == 1)).any(axis=1)
+    return good_prediction.value_counts()[True] / good_prediction.shape[0]
 
 
 def main():
-    # Define the target array
-    n = 1000
-    Y = np.random.randn(n, 1)
+    # # Define the target array
+    # n = 1000
+    # Y = np.random.randn(n, 1)
 
-    # Define the numeric data
-    nb_num = 300
-    nb_unif_num = 300
-    max_sigma = 4
+    # # Define the numeric data
+    # nb_num = 300
+    # nb_unif_num = 300
+    # max_sigma = 4
 
-    N = create_all_num_var(nb_num, max_sigma, Y)
+    # N = create_all_num_var(nb_num, max_sigma, Y)
 
-    # Define the categorical data
-    # number of categorical variables : nb_cat
-    nb_cat = 1000
-    nb_unif_cat = 1000
+    # # Define the categorical data
+    # # number of categorical variables : nb_cat
+    # nb_cat = 1000
+    # nb_unif_cat = 1000
 
-    # min and max number of categorical values for a categorical column : min_cat, max_cat
-    min_cat = 10
-    max_cat = 15
+    # # min and max number of categorical values for a categorical column : min_cat, max_cat
+    # min_cat = 10
+    # max_cat = 15
 
-    C = create_all_cat_var(nb_cat, min_cat, max_cat, Y)
+    # C = create_all_cat_var(nb_cat, min_cat, max_cat, Y)
 
-    # Compute the statistics
-    fs = FeatureSelector(numeric_stat="pearson", categoric_stat="anova")
-    corr, anova = compute_stat(N, C, Y, fs)
+    # # Compute the statistics
+    # fs = FeatureSelector(numeric_stat="pearson", categoric_stat="anova")
+    # corr, anova = compute_stat(N, C, Y, fs)
 
-    # Get a uniform distribution for the data
-    N, C, corr, anova = uniform_sample(N, C, corr, anova, nb_unif_num, nb_unif_cat)
+    # # Get a uniform distribution for the data
+    # N, C, corr, anova = uniform_sample(N, C, corr, anova, nb_unif_num, nb_unif_cat)
 
-    # Parameter definition
-    min_corr_list = [0.0, 0.1, 0.2, 0.3, 0.4]
-    max_corr_list = [0.6, 0.7, 0.8, 0.9]
-    min_anova_list = [100, 200, 300, 500]
-    max_anova_list = [1000, 2000, 3000, 4000]
-    num_corr_list = [50, 150, 250]
-    num_anova_list = [100, 250, 1000]
-    distribution = ["uniform", "binomial", "geometric", "poisson"]
+    # # Parameter definition
+    # min_corr_list = [0.0, 0.1, 0.2, 0.3, 0.4]
+    # max_corr_list = [0.6, 0.7, 0.8, 0.9]
+    # min_anova_list = [100, 200, 300, 500]
+    # max_anova_list = [1000, 2000, 3000, 4000]
+    # num_corr_list = [50, 150, 250]
+    # num_anova_list = [100, 250, 1000]
+    # distribution = ["uniform", "binomial", "geometric", "poisson"]
     strategy_dict = {
         "independent": select_independent,
         "min_max": select_min_max_norm,
         "2nd_order": select_2nd_order_norm,
         "quantile": select_quantile_norm,
     }
+    # # min_corr_list = [0.2, 0.4]
+    # # max_corr_list = [0.6, 0.8]
+    # # min_anova_list = [300, 500]
+    # # max_anova_list = [1000, 4000]
+    # # num_corr_list = [
+    # #     50,
+    # # ]
+    # # num_anova_list = [
+    # #     100,
+    # # ]
+    # # distribution = ["uniform", "binomial", "geometric", "poisson"]
+    # # strategy_dict = {
+    # #     "independent": select_independent,
+    # #     "min_max": select_min_max_norm,
+    # #     "2nd_order": select_2nd_order_norm,
+    # #     "quantile": select_quantile_norm,
+    # # }
 
-    # Run experiments to get data
-    input_list, best_strategy_list = decision_training(
-        N,
-        C,
-        Y,
-        corr,
-        anova,
-        min_corr_list,
-        max_corr_list,
-        min_anova_list,
-        max_anova_list,
-        num_corr_list,
-        num_anova_list,
-        distribution,
-        distribution,
+    # # Run experiments to get data
+    # input_list, strategy_score_list = decision_training(
+    #     N,
+    #     C,
+    #     Y,
+    #     corr,
+    #     anova,
+    #     min_corr_list,
+    #     max_corr_list,
+    #     min_anova_list,
+    #     max_anova_list,
+    #     num_corr_list,
+    #     num_anova_list,
+    #     distribution,
+    #     distribution,
+    #     strategy_dict,
+    # )
+
+    # # Process the data in a pandas DataFrame
+    # decision_df = pd.DataFrame(input_list)
+    # strategy_score_df = pd.DataFrame(strategy_score_list)
+    # decision_df = pd.concat([decision_df, strategy_score_df], axis=1)
+
+    # decision_df.to_csv("decision.csv")
+
+    # Prepare the data for learning
+    decision_df = pd.read_csv("decision.csv", index_col=0)
+
+    target = list(strategy_dict.keys())
+    X, y_prob = (
+        decision_df.drop(columns=target),
+        decision_df[target].apply(prediction_probability_from_mse, axis=1),
+    )
+    y = y_prob.applymap(threshold_prob)
+
+    X_train, X_test, y_train, y_test, y_prob_train, y_prob_test = train_test_split(
+        X, y, y_prob
     )
 
-    # Process the data in a pandas DataFrame
-    decision_df = pd.DataFrame(input_list)
-    decision_df["best_strategy"] = best_strategy_list
+    print("Normalization of the input data")
+    input_scaler = MinMaxScaler().fit(X_train)
+    X_train_n = input_scaler.transform(X_train)
+    X_test_n = input_scaler.transform(X_test)
+    dump(input_scaler, "input_scaler.joblib")
 
-    decision_df.to_csv("decision.csv")
+    # Train decision model using classification
+    print("Train classification model")
+    decision_model_clf = MLPClassifier(hidden_layer_sizes=(50, 20,))
+    decision_model_clf.fit(X_train_n, y_train)
 
+    dump(decision_model_clf, "decision_model_clf.joblib")
+
+    # Train decision model using regression
+    print("Train regression model")
+    decision_model_reg = MLPRegressor(hidden_layer_sizes=(50, 20,))
+    decision_model_reg.fit(X_train_n, y_prob_train)
+
+    dump(decision_model_reg, "decision_model_reg.joblib")
+
+    # Evaluate decision model using classification
+    y_test_pred = pd.DataFrame(
+        decision_model_clf.predict_proba(X_test_n),
+        columns=["independent", "min_max", "2nd_order", "quantile"],
+    )
+    y_train_pred = pd.DataFrame(
+        decision_model_clf.predict_proba(X_train_n),
+        columns=["independent", "min_max", "2nd_order", "quantile"],
+    )
     print(
-        f"Chosen strategies have been : {decision_df['best_strategy'].value_counts()}"
+        f"Test score of the decision model using classification is: {accuracy_proba(y_test, y_test_pred)}"
+    )
+    print(
+        f"Train score of the decision model using classification is: {accuracy_proba(y_train, y_train_pred)}"
     )
 
-    target = "best_strategy"
-    X, y = decision_df.drop(columns=[target]), pd.get_dummies(decision_df[target])
+    # Evaluate decision model using regression
+    y_test_pred = pd.DataFrame(
+        decision_model_reg.predict(X_test_n),
+        columns=["independent", "min_max", "2nd_order", "quantile"],
+    )
+    y_train_pred = pd.DataFrame(
+        decision_model_reg.predict(X_train_n),
+        columns=["independent", "min_max", "2nd_order", "quantile"],
+    )
+    print(
+        f"Test score of the decision model using regression is: {accuracy_proba(y_test, y_test_pred)}"
+    )
+    print(
+        f"Train score of the decision model using regression is: {accuracy_proba(y_train, y_train_pred)}"
+    )
 
-    # Train decision model
-    X_train, X_test, y_train, y_test = train_test_split(X, y)
-    decision_model = MLPClassifier(hidden_layer_sizes=(20,)).fit(X_train, y_train)
 
-    dump(decision_model, "decision_model.joblib")
-
-    # Evaluate decision model
-    decision_model.score(X_test, y_test)
+if __name__ == "__main__":
+    main()

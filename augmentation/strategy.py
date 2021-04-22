@@ -62,10 +62,10 @@ def k_best_independent(
     table_col_stat_categoric = table_col_stat(stat_dict, type_dict, "categoric")
     table_col_stat_numeric_to_keep = sorted(
         table_col_stat_numeric, key=itemgetter(2), reverse=True
-    )[:k_best]
+    )[: k_best - k_best // 2]
     table_col_stat_categoric_to_keep = sorted(
         table_col_stat_categoric, key=itemgetter(2), reverse=True
-    )[:k_best]
+    )[: k_best // 2]
     for table_id, col_id, _ in table_col_stat_numeric_to_keep:
         if table_id in table_column_to_keep.keys():
             table_column_to_keep[table_id].append(col_id)
